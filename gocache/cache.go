@@ -1,7 +1,7 @@
-package distributed_go_cache
+package gocache
 
 import (
-	"CrazyCollin/distributed-go-cache/lru"
+	"gocache/lru"
 	"sync"
 )
 

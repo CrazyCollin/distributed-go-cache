@@ -1,4 +1,4 @@
-package distributed_go_cache
+package gocache
 
 import (
 	"fmt"
