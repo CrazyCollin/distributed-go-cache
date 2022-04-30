@@ -60,7 +60,7 @@ func (m *Map) Add(keys ...string) {
 
 //
 // Get
-// @Description: 得到key值对应节点
+// @Description: 一致性哈希 得到key值对应节点
 // @receiver m
 // @param key
 // @return string

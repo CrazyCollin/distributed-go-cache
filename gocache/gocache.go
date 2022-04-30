@@ -2,6 +2,7 @@ package gocache
 
 import (
 	"fmt"
+	"gocache/singleflight"
 	"log"
 	"sync"
 )
@@ -25,6 +26,8 @@ type Group struct {
 	//缓存未命中时进行回调获取数据
 	getter    Getter
 	mainCache cache
+	peers     PeerPicker
+	loader    *singleflight.Group
 }
 
 var (
@@ -50,9 +53,40 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		name:      name,
 		mainCache: cache{cacheBytes: cacheBytes},
 		getter:    getter,
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	return g
+}
+
+//
+// RegisterPeers
+// @Description: 实现PeerPicker的HTTPPool可以注入到Group中
+// @receiver g
+// @param peers
+//
+func (g *Group) RegisterPeers(peers PeerPicker) {
+	if g.peers != nil {
+		panic("register PeerPicker called more than once")
+	}
+	g.peers = peers
+}
+
+//
+// getFromPeer
+// @Description: 实现访问远程节点的再一次封装
+// @receiver g
+// @param peer
+// @param key
+// @return ByteView
+// @return error
+//
+func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
+	bytes, err := peer.Get(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+	return ByteView{bytes}, err
 }
 
 //
@@ -87,8 +121,31 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
+//
+// load
+// @Description: 缓存获取逻辑,首先尝试从远程拿缓存，其次再考虑本地取数据
+// @receiver g
+// @param key
+// @return value
+// @return err
+//
 func (g *Group) load(key string) (value ByteView, err error) {
-	return g.getLocally(key)
+	//本地缓存不命中
+	viewi, err := g.loader.Do(key, func() (interface{}, error) {
+		if g.peers != nil {
+			if peer, ok := g.peers.PickPeer(key); ok {
+				if value, err = g.getFromPeer(peer, key); err != nil {
+					return value, nil
+				}
+				log.Println("[gocache] Failed to get remote data from peer :", peer)
+			}
+		}
+		return g.getLocally(key)
+	})
+	if err == nil {
+		return viewi.(ByteView), nil
+	}
+	return
 }
 
 func (g *Group) getLocally(key string) (ByteView, error) {

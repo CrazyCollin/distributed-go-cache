@@ -2,18 +2,28 @@ package gocache
 
 import (
 	"fmt"
+	"gocache/consistenthash"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 )
 
-const defaultBasePath = "/_gocache/"
+const (
+	defaultBasePath = "/_gocache/"
+	defaultReplicas = 50
+)
 
 type HTTPPool struct {
 	//记录本机名与端口
 	self string
 	//节点通讯地址前缀
-	basePath string
+	basePath    string
+	mu          sync.Mutex
+	peers       *consistenthash.Map
+	httpGetters map[string]*httpGetter
 }
 
 func NewHTTPPool(self string) *HTTPPool {
@@ -67,4 +77,80 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	//返回拷贝
 	w.Write(view.ByteSlice())
+}
+
+//
+// Set
+// @Description: 实例化一致性哈希算法，并传入实例节点
+// @receiver p
+// @param peers
+//
+func (p *HTTPPool) Set(peers ...string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peers = consistenthash.New(defaultReplicas, nil)
+	//在表中增加节点
+	p.peers.Add(peers...)
+	p.httpGetters = make(map[string]*httpGetter, len(peers))
+	for _, peer := range peers {
+		p.httpGetters[peer] = &httpGetter{baseURL: peer + p.basePath}
+	}
+}
+
+//
+// PickPeer
+// @Description: 哈希列表中调用实际节点
+// @receiver p
+// @param key
+// @return PeerGetter
+// @return bool
+//
+func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	//调用不为空，且不为本身节点
+	if peer := p.peers.Get(key); peer != "" && peer != p.self {
+		p.Log("pick peer %s", peer)
+		return p.httpGetters[peer], true
+	}
+	return nil, false
+}
+
+//
+// httpGetter
+// @Description: http的实际客户端结构体，一个远程节点对应一个结构体
+//
+type httpGetter struct {
+	baseURL string
+}
+
+//
+// Get
+// @Description:
+// @receiver g
+// @param group
+// @param key
+// @return []byte
+// @return error
+//
+func (g *httpGetter) Get(group string, key string) ([]byte, error) {
+	u := fmt.Sprintf(
+		"%v%v/%v",
+		g.baseURL,
+		url.QueryEscape(group),
+		url.QueryEscape(key),
+	)
+	res, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned:%v", res.Status)
+	}
+	bytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body:%v", err)
+	}
+	return bytes, nil
 }
