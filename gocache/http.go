@@ -22,9 +22,11 @@ type HTTPPool struct {
 	//记录本机名与端口
 	self string
 	//节点通讯地址前缀
-	basePath    string
-	mu          sync.Mutex
-	peers       *consistenthash.Map
+	basePath string
+	mu       sync.Mutex
+	//一致性哈希Map
+	peers *consistenthash.Map
+	//本地客户端获取远程节点数据map
 	httpGetters map[string]*httpGetter
 }
 
@@ -144,6 +146,7 @@ func (g *httpGetter) Get(in *pb.Request, out *pb.Response) error {
 		url.QueryEscape(in.GetGroup()),
 		url.QueryEscape(in.GetKey()),
 	)
+	//发出http请求
 	res, err := http.Get(u)
 	if err != nil {
 		return err

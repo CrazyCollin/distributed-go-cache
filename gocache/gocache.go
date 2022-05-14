@@ -23,12 +23,16 @@ func (f GetterFunc) Get(key string) ([]byte, error) {
 // @Description: 一个缓存的命名空间，拥有唯一名称
 //
 type Group struct {
+	//缓存空间命名
 	name string
 	//缓存未命中时进行回调获取数据
-	getter    Getter
+	getter Getter
+	//缓存
 	mainCache cache
-	peers     PeerPicker
-	loader    *singleflight.Group
+	//远程数据获取接口
+	peers PeerPicker
+	//并发处理请求策略
+	loader *singleflight.Group
 }
 
 var (
@@ -137,9 +141,12 @@ func (g *Group) Get(key string) (ByteView, error) {
 //
 func (g *Group) load(key string) (value ByteView, err error) {
 	//本地缓存不命中
+	//并发处理
 	viewi, err := g.loader.Do(key, func() (interface{}, error) {
 		if g.peers != nil {
+			//一致性哈希选取节点
 			if peer, ok := g.peers.PickPeer(key); ok {
+				//远程调用数据
 				if value, err = g.getFromPeer(peer, key); err != nil {
 					return value, nil
 				}

@@ -75,5 +75,6 @@ func (m *Map) Get(key string) string {
 	idx := sort.Search(len(m.keys), func(i int) bool {
 		return m.keys[i] >= hash
 	})
+	//哈希环获取
 	return m.hashMap[m.keys[idx%len(m.keys)]]
 }
